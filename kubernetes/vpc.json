@@ -1,0 +1,382 @@
+{
+   "AWSTemplateFormatVersion" : "2010-09-09",
+   "Resources" : {
+      "VPC": {
+         "Type": "AWS::EC2::VPC",
+         "Properties": {
+            "CidrBlock": "10.240.0.0/24",
+            "Tags": [
+               {
+                  "Key": "foo",
+                  "Value": "bar"
+               }
+            ]
+         }
+      },
+      "Subnet": {
+         "Type": "AWS::EC2::Subnet",
+         "Properties": {
+            "CidrBlock": "10.240.0.0/24",
+            "AvailabilityZone": "us-east-2a",
+            "VpcId": {
+               "Ref": "VPC"
+            }
+         }
+      },
+      "DHCP": {
+         "Type": "AWS::EC2::DHCPOptions",
+         "Properties": {
+            "DomainName": "us-east-2.compute.internal",
+            "DomainNameServers": [
+               "AmazonProvidedDNS"
+            ]
+         }
+      },
+      "IGW": {
+         "Type": "AWS::EC2::InternetGateway"
+      },
+      "AttachIGW": {
+         "Type" : "AWS::EC2::VPCGatewayAttachment",
+         "Properties" : {
+            "InternetGatewayId": { "Ref" : "IGW" },
+            "VpcId" : { "Ref" : "VPC" }
+         }
+      },
+      "RouteTable": {
+         "Type" : "AWS::EC2::RouteTable",
+         "Properties" : {
+            "VpcId" : { "Ref" : "VPC" }
+         }
+      },
+      "Route": {
+         "Type" : "AWS::EC2::Route",
+         "Properties" : {
+            "RouteTableId" : { "Ref" : "RouteTable" },
+            "DestinationCidrBlock" : "0.0.0.0/0",
+            "GatewayId" : { "Ref" : "IGW" }
+         }
+      },
+      "SecurityGroup": {
+         "Type" : "AWS::EC2::SecurityGroup",
+         "Properties" : {
+            "GroupName" : "Kubernetes",
+            "GroupDescription" : "Kubernetes security group",
+            "SecurityGroupIngress" : [
+               {
+                  "IpProtocol": "-1",
+                  "CidrIp": "10.240.0.0/24"
+               },
+               {
+                  "IpProtocol": "-1",
+                  "CidrIp": "10.200.0.0/16"
+               },
+               {
+                  "IpProtocol": "tcp",
+                  "FromPort" : 22,
+                  "ToPort": 22,
+                  "CidrIp": "0.0.0.0/0"
+               },
+               {
+                  "IpProtocol": "tcp",
+                  "FromPort" : 6443,
+                  "ToPort" : 6443,
+                  "CidrIp": "0.0.0.0/0"
+               },
+               {
+                  "IpProtocol": "icmp",
+                  "FromPort" : -1,
+                  "ToPort" : -1,
+                  "CidrIp": "0.0.0.0/0"
+               }
+            ],
+            "VpcId" : { "Ref" : "VPC" }
+         }
+      },
+      "LoadBalancer": {
+         "Type" : "AWS::ElasticLoadBalancingV2::LoadBalancer",
+         "Properties" : {
+            "Name" : "Kubernetes",
+            "Scheme" : "internet-facing",
+            "Subnets" : [ {"Ref": "Subnet"} ],
+            "Type" : "network"
+         }
+      },
+      "TargetGroup" : {
+         "Type" : "AWS::ElasticLoadBalancingV2::TargetGroup",
+         "Properties" : {
+            "Name": "Kubernetes",
+            "Port": 6443,
+            "Protocol": "TCP",
+            "TargetType" : "ip",
+            "VpcId": {"Ref" : "VPC"},
+            "Targets": [
+               { "Id": "10.240.0.10" }
+            ]
+         }
+      },
+      "Listener": {
+         "Type": "AWS::ElasticLoadBalancingV2::Listener",
+         "Properties": {
+            "DefaultActions": [{
+               "Type": "forward",
+               "TargetGroupArn": { "Ref": "TargetGroup" }
+            }],
+            "LoadBalancerArn": { "Ref": "LoadBalancer" },
+            "Port": "6443",
+            "Protocol": "TCP"
+         }
+      },
+      "controller0" : {
+         "Type" : "AWS::EC2::Instance",
+         "Properties" : {
+            "ImageId" : "ami-0c8b8e32659017cc5",
+            "InstanceType" : "t2.micro",
+            "KeyName" : "kubernetes",
+            "UserData": "bmFtZT1jb250cm9sbGVyLTAK",
+            "Tags" : [
+               {"Key" : "Name", "Value" : "controller-0"}
+            ],
+            "NetworkInterfaces" : [
+               {
+                  "DeleteOnTermination" : true,
+                  "Description"         : "Main interface",
+                  "DeviceIndex"         : "0",
+                  "PrivateIpAddresses"  : [
+                     {
+                        "PrivateIpAddress" : "10.240.0.10",
+                        "Primary"          : true
+                     }
+                  ],
+                  "GroupSet" : [
+                     {
+                        "Ref" : "SecurityGroup"
+                     }
+                  ],
+                  "SubnetId" : {
+                     "Ref" : "Subnet"
+                  }
+               }
+            ]
+         }
+      },
+      "EIPcontroller0" : {
+         "Type" : "AWS::EC2::EIP",
+         "Properties" : {
+            "InstanceId" : {
+               "Ref" : "controller0"
+            },
+            "Domain"     : "vpc"
+         }
+      },
+      "controller1" : {
+         "Type" : "AWS::EC2::Instance",
+         "Properties" : {
+            "ImageId" : "ami-0c8b8e32659017cc5",
+            "InstanceType" : "t2.micro",
+            "KeyName" : "kubernetes",
+            "UserData": "bmFtZT1jb250cm9sbGVyLTAK",
+            "Tags" : [
+               {"Key" : "Name", "Value" : "controller-1"}
+            ],
+            "NetworkInterfaces" : [
+               {
+                  "DeleteOnTermination" : true,
+                  "Description"         : "Main interface",
+                  "DeviceIndex"         : "0",
+                  "PrivateIpAddresses"  : [
+                     {
+                        "PrivateIpAddress" : "10.240.0.11",
+                        "Primary"          : true
+                     }
+                  ],
+                  "GroupSet" : [
+                     {
+                        "Ref" : "SecurityGroup"
+                     }
+                  ],
+                  "SubnetId" : {
+                     "Ref" : "Subnet"
+                  }
+               }
+            ]
+         }
+      },
+      "EIPcontroller1" : {
+         "Type" : "AWS::EC2::EIP",
+         "Properties" : {
+            "InstanceId" : {
+               "Ref" : "controller1"
+            },
+            "Domain"     : "vpc"
+         }
+      },
+      "controller2" : {
+         "Type" : "AWS::EC2::Instance",
+         "Properties" : {
+            "ImageId" : "ami-0c8b8e32659017cc5",
+            "InstanceType" : "t2.micro",
+            "KeyName" : "kubernetes",
+            "UserData": "bmFtZT1jb250cm9sbGVyLTAK",
+            "Tags" : [
+               {"Key" : "Name", "Value" : "controller-2"}
+            ],
+            "NetworkInterfaces" : [
+               {
+                  "DeleteOnTermination" : true,
+                  "Description"         : "Main interface",
+                  "DeviceIndex"         : "0",
+                  "PrivateIpAddresses"  : [
+                     {
+                        "PrivateIpAddress" : "10.240.0.12",
+                        "Primary"          : true
+                     }
+                  ],
+                  "GroupSet" : [
+                     {
+                        "Ref" : "SecurityGroup"
+                     }
+                  ],
+                  "SubnetId" : {
+                     "Ref" : "Subnet"
+                  }
+               }
+            ]
+         }
+      },
+      "EIPcontroller2" : {
+         "Type" : "AWS::EC2::EIP",
+         "Properties" : {
+            "InstanceId" : {
+               "Ref" : "controller2"
+            },
+            "Domain"     : "vpc"
+         }
+      },
+      "worker0" : {
+         "Type" : "AWS::EC2::Instance",
+         "Properties" : {
+            "ImageId" : "ami-0c8b8e32659017cc5",
+            "InstanceType" : "t2.micro",
+            "KeyName" : "kubernetes",
+            "UserData": "bmFtZT1jb250cm9sbGVyLTAK",
+            "Tags" : [
+               {"Key" : "Name", "Value" : "worker-0"}
+            ],
+            "NetworkInterfaces" : [
+               {
+                  "DeleteOnTermination" : true,
+                  "Description"         : "Main interface",
+                  "DeviceIndex"         : "0",
+                  "PrivateIpAddresses"  : [
+                     {
+                        "PrivateIpAddress" : "10.240.0.20",
+                        "Primary"          : true
+                     }
+                  ],
+                  "GroupSet" : [
+                     {
+                        "Ref" : "SecurityGroup"
+                     }
+                  ],
+                  "SubnetId" : {
+                     "Ref" : "Subnet"
+                  }
+               }
+            ]
+         }
+      },
+      "EIPworker0" : {
+         "Type" : "AWS::EC2::EIP",
+         "Properties" : {
+            "InstanceId" : {
+               "Ref" : "worker0"
+            },
+            "Domain"     : "vpc"
+         }
+      },
+      "worker1" : {
+         "Type" : "AWS::EC2::Instance",
+         "Properties" : {
+            "ImageId" : "ami-0c8b8e32659017cc5",
+            "InstanceType" : "t2.micro",
+            "KeyName" : "kubernetes",
+            "UserData": "bmFtZT1jb250cm9sbGVyLTAK",
+            "Tags" : [
+               {"Key" : "Name", "Value" : "worker-1"}
+            ],
+            "NetworkInterfaces" : [
+               {
+                  "DeleteOnTermination" : true,
+                  "Description"         : "Main interface",
+                  "DeviceIndex"         : "0",
+                  "PrivateIpAddresses"  : [
+                     {
+                        "PrivateIpAddress" : "10.240.0.21",
+                        "Primary"          : true
+                     }
+                  ],
+                  "GroupSet" : [
+                     {
+                        "Ref" : "SecurityGroup"
+                     }
+                  ],
+                  "SubnetId" : {
+                     "Ref" : "Subnet"
+                  }
+               }
+            ]
+         }
+      },
+      "EIPworker0" : {
+         "Type" : "AWS::EC2::EIP",
+         "Properties" : {
+            "InstanceId" : {
+               "Ref" : "worker1"
+            },
+            "Domain"     : "vpc"
+         }
+      },
+      "worker2" : {
+         "Type" : "AWS::EC2::Instance",
+         "Properties" : {
+            "ImageId" : "ami-0c8b8e32659017cc5",
+            "InstanceType" : "t2.micro",
+            "KeyName" : "kubernetes",
+            "UserData": "bmFtZT1jb250cm9sbGVyLTAK",
+            "Tags" : [
+               {"Key" : "Name", "Value" : "worker-2"}
+            ],
+            "NetworkInterfaces" : [
+               {
+                  "DeleteOnTermination" : true,
+                  "Description"         : "Main interface",
+                  "DeviceIndex"         : "0",
+                  "PrivateIpAddresses"  : [
+                     {
+                        "PrivateIpAddress" : "10.240.0.22",
+                        "Primary"          : true
+                     }
+                  ],
+                  "GroupSet" : [
+                     {
+                        "Ref" : "SecurityGroup"
+                     }
+                  ],
+                  "SubnetId" : {
+                     "Ref" : "Subnet"
+                  }
+               }
+            ]
+         }
+      },
+      "EIPworker0" : {
+         "Type" : "AWS::EC2::EIP",
+         "Properties" : {
+            "InstanceId" : {
+               "Ref" : "worker2"
+            },
+            "Domain"     : "vpc"
+         }
+      }
+   }
+}
